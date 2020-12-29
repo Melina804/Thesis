@@ -1,0 +1,997 @@
+---
+title: "Analysis -"
+author: "Melina"
+date: "7/10/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+Link to which questionaire is what: https://docs.google.com/spreadsheets/d/1kbv-ebeS_XmRVG7ZzIParUrfStKHXqZbB8D5Kyr4UFE/edit#gid=0 
+
+Loading packages 
+```{r}
+#Read in packages
+pacman::p_load(tidyverse, dplyr, corrplot, reshape2, ggthemes, bootnet, huge, qgraph, networktools, igraph)
+
+
+```
+
+
+
+Importing data 
+```{r setup, include=FALSE}
+# Importing HRD data 
+HRD_data <- read_delim(here::here("Data", 'HRD.txt'),  delim=",")
+
+# Importing questionaire data 
+data <- read_csv(here::here("Data", "raw_data.csv"))
+
+# Go to "Simple_function"  to preprocess questionaire data 
+
+# Go to get scores function to get the scores data 
+scores <- read_csv(here::here("Data", "scores.csv"))
+
+
+
+```
+
+
+Preprocessing data frames for merging 
+```{r}
+
+### Preparing HRD data 
+
+# Filtering data so only part 1 HRD data is included 
+HRD_data <- filter(HRD_data, Session == "Del1")
+
+
+# Creating record_id column 
+HRD_data$record_id <- stringr::str_extract(HRD_data$Subject, "\\d{4}")
+
+# making record ID  numeric 
+HRD_data$record_id <- as.numeric(HRD_data$record_id)
+
+#create column for absolute value of Threshold (as a value of 0 indicates precise interoception, while anything above and below indicates bias)
+HRD_data <- HRD_data %>% mutate(absolute_threshold = abs(Threshold))
+
+# Creating new data frame
+intero_df <- HRD_data
+
+# Only putting intero into this data frame 
+intero_df$Modality <- ifelse(intero_df$Modality == "Intero", "Intero", NA)
+
+# Removing NA 
+intero_df <- intero_df[!is.na(intero_df$Modality),]
+
+# Creating new datafram 
+extero_df <- HRD_data
+
+# Only putting extreo into this dataframe 
+extero_df$Modality <- ifelse(extero_df$Modality == "Extero", "Extero", NA)
+# Removing NA 
+extero_df <-  extero_df[!is.na(extero_df$Modality),]
+
+# remaning columns 
+extero_df <- extero_df %>% 
+    rename(
+      Ex_Accuracy = Accuracy,
+      Ex_threshold = Threshold,
+      Ex_Criterion = Criterion,
+      Ex_Slope = Slope,
+      Ex_dPrime = dPrime
+    )
+
+# remaning columns 
+intero_df <- intero_df %>% 
+    rename(
+      In_Accuracy = Accuracy,
+      In_threshold = Threshold,
+      In_Criterion = Criterion,
+      In_Slope = Slope,
+      In_dPrime = dPrime
+    )
+
+
+### Preparing questionaire data after running the clean data function on it - IDIVIDUAL ITEMS 
+
+# Making record ID numeric 
+clean_data_set$record_id <- as.numeric(clean_data_set$record_id)
+
+# Removing 44 and 46, becuase they have pseudo ID's and 1108 as thisis Nanna trying stuff
+clean_data_set <- filter(clean_data_set, record_id != 44 & record_id != 46 &  record_id != 1108 &  record_id != 222)
+
+#  5934 = 44
+clean_data_set$record_id <- ifelse(clean_data_set$record_id == 5934, 44, clean_data_set$record_id)
+
+#  5992 = 46
+clean_data_set$record_id <- ifelse(clean_data_set$record_id == 5992, 46, clean_data_set$record_id)
+
+
+# 6335 = 222
+clean_data_set$record_id <- ifelse(clean_data_set$record_id == 6335, 222, clean_data_set$record_id)
+
+
+# Removing people who have not filled in the questionaires 
+clean_data_set <- filter(clean_data_set, record_id != 43 & record_id != 47 & record_id != 91 & record_id != 56 & record_id != 62 & record_id != 75 & record_id != 86 & record_id != 110 & record_id != 122 & record_id != 141 & record_id != 173 & record_id != 199 & record_id != 222 & record_id != 227 & record_id != 221)
+
+
+
+### Preparing questionaire data after running the get scoresfunction on it - SCORES 
+
+# Making record ID numeric 
+scores$record_id <- as.numeric(scores$record_id)
+
+# Removing 44 and 46, becuase they have pseudo ID's and 1108 as thisis Nanna trying stuff
+scores <- filter(scores, record_id != 44 & record_id != 46 & record_id != 1108)
+
+#  5934 = 44
+scores$record_id <- ifelse(scores$record_id == 5934, 44, scores$record_id)
+
+#  5992 = 46
+scores$record_id <- ifelse(scores$record_id == 5992, 46, scores$record_id)
+
+scores$record_id <- ifelse(scores$record_id == 6335, 222, scores$record_id)
+
+# Removing people who have not filled in the questionaires 
+scores <- filter(scores, record_id != 43 & record_id != 47 & record_id != 91 & record_id != 56 & record_id != 62 & record_id != 75 & record_id != 86 & record_id != 110 & record_id != 122 & record_id != 141 & record_id != 173 & record_id != 199 & record_id != 222 & record_id != 227 & record_id != 221)
+
+
+
+```
+
+
+Merging dataframes 
+```{r}
+
+# merging intero and extreo data to create wide forma 
+combined_ex_in_df <- merge(extero_df, intero_df, by = "record_id")
+combined_HBC_df <- select(combined_HBC_df, -c(HBC.x))
+
+# Merging HRD and questionaires (individual items) data in a wide format 
+HRD_questionaire_merge <- merge(combined_ex_in_df, clean_data_set, by = "record_id")
+
+# Merging HRD and questionaires (SCORES) data in a wide format 
+HRD_Scores <- merge(combined_ex_in_df, scores, by = "record_id")
+
+
+HRD_single_item <- write_csv(HRD_single_item, here::here("data","HRD_questionnaire_singleitem.csv"))
+HRD_sum_scores <- write_csv(HRD_sum_scores, here::here("data","HRD_sum_scores.csv"))
+
+ # OLD TRIES 
+
+
+#merged_data <- merge(HRD_data, all_data) # Some data gets removed when merging... 
+#merged_data_1 = subset(merged_data, select = -c(be_id, Subject) )
+
+# HRD_Pycho <- merge(HRD_data, clean_data, by = "record_id", all = TRUE)
+# HRD_Pycho_missing <- merge(HRD_data, clean_data, by = "record_id")
+# HRD_Pycho_scores <- merge(HRD_data, scores, by = "record_id")
+# 
+# write_csv(HRD_Pycho, here("data","HRD_Pycho.csv"))
+# write_csv(HRD_Pycho_missing, here("data","HRD_Pycho_missing.csv"))
+```
+
+
+
+Demographics and simple descriptive stats 
+```{r demogrphics}
+# Total number of participants
+  # 216 people have completed the HRD 
+  # 206 have completed the questionaires 
+  # 199 people have completed both the HRD and the questionaires 
+
+# Total number excluded 
+  # 0033  Don't have HRD data 
+  # 0036  Don't have questionaire data 
+  # 0041  Don't have questionaire data 
+  # 0043   still in the dataset, but have not filled in the questionaire 
+  # 0110  Don't have questionaire data 
+  # 0192  Are still in the data set, have both HRD and questionaire 
+HRD_questionaire_merge <- filter(HRD_questionaire_merge, record_id != 192)
+HRD_data <- filter(HRD_data, record_id != 192)
+data <- filter(data, record_id != "0192")
+HRD_Scores <- filter(HRD_Scores, record_id != 192)
+
+# Total number included in analysis 
+  # 198 included in the analysis 
+
+
+
+# FROM HERE ONLY THE PEOPLE INCLUDED 
+
+# Mean task duration of HRD
+mean(HRD_questionaire_merge$TaskDuration.x) # mean task duration is 31.5 min. 
+
+# mean age 
+mean(HRD_questionaire_merge$age) # mean age is 24.7
+sd(HRD_questionaire_merge$age) # sd of 4.9
+
+# Gender distribtuion
+# Number of men, women, other
+HRD_questionaire_merge %>%
+  group_by(gender)%>%
+  summarise(count = n())
+            # 1 = Woman = 113
+            # 2 = men = 79
+            # 3 = other = 1 
+
+mean(HRD_questionaire_merge$age) # mean age is 24.7
+sd(HRD_questionaire_merge$age) # sd is 5
+min(HRD_questionaire_merge$age) # 18 
+
+mean(HRD_questionaire_merge$In_Slope)
+sd(HRD_questionaire_merge$In_Slope)
+mean(HRD_questionaire_merge$Ex_Slope)
+sd(HRD_questionaire_merge$Ex_Slope)
+
+mean(HRD_questionaire_merge$In_threshold)
+sd(HRD_questionaire_merge$In_threshold)
+mean(HRD_questionaire_merge$Ex_threshold)
+sd(HRD_questionaire_merge$Ex_threshold)
+
+HRD_Scores$PCL_high_cutoff <- as.numeric(HRD_Scores$PCL_high_cutoff)
+summarise(HRD_Scores$PCL_high_cutoff)
+
+HRD_Scores %>%
+  count(PCL >= 44)
+
+HRD_Scores %>%
+  count(DQ5 >= 11)
+
+HRD_Scores %>%
+  count(stai >= 80)
+
+HRD_Scores %>%
+  count(mdi >= 21)
+
+HRD_Scores %>%
+  count(PHQ9 >= 10)
+```
+
+
+HRD task data plots 
+```{r}
+
+### PLOTS FOR USE ###
+
+# Plot of slope 
+SL <- ggplot(data= HRD_data, aes(x= Modality, y= Slope, color = Modality, fill = Modality )) +
+  geom_bar(stat="summary", fun.y = mean)+
+  theme_stata(scheme = "s1color")+
+  scale_colour_stata(scheme = "s2color")+
+  scale_fill_stata(scheme = "s2color")+
+  geom_errorbar(stat="summary", fun.data=mean_se, color = "black", width = 0.7)
+
+SL
+
+# mean slope per modality 
+HRD_data %>%
+  group_by(Modality)%>%
+  summarise(mean(Slope))  
+   # Extero =  13.24837	
+    # Intero = 15.55022	
+
+
+
+box_slope <- ggplot(HRD_data, aes(x= Modality, y= Slope, color = Modality, fill = Modality)) + 
+  geom_boxplot(color = "black", alpha = 0.8)+
+  geom_jitter()+
+  theme_stata(scheme = "s1color")+
+  scale_colour_stata(scheme = "s2color")+
+  scale_fill_stata(scheme = "s2color")
+
+box_slope
+
+# large slope = uncertain decision 
+# This plot shows that participants are less certain/precise about the stimuli being faster or slower than their own heart beat for the intero condition than for the extero condition
+
+# Plot of threashold 
+thres_violin <- ggplot(HRD_data, aes(x= Modality, y= Threshold, color = Modality)) + 
+  geom_violin()+ 
+  geom_boxplot(width=0.1)+
+  theme_stata(scheme = "s1color")+ 
+   scale_colour_stata("s2color")
+
+thres_violin
+# Participants are biased in the intero condition. Generally think their heart rate is slower than it actually is. They need more information to become better. 
+
+# mean threshold per modality 
+HRD_data %>%
+  group_by(Modality)%>%
+  summarise(mean(Threshold))  
+    # extero = 1.394202	
+    # Intero = -7.391173	
+
+
+# Participants are more accurate for extero conditions compared to intero conditions 
+
+
+# Confidence is invertly related to slope.
+# Nu større slope er nu mindre præcise er deltagerne i at høre/mærke forksllen på om det er hurtigere eller langsommere end deres hjerne. # Nu mere upræcise de er nu mere usikre er de. 
+
+acc_RT <- ggplot(data= HRD_data, aes(x= DecisionRT, y= Accuracy, color = Modality)) +
+  geom_point()+
+  geom_smooth(method = lm)+
+  theme_stata(scheme = "s1color")+
+  scale_colour_stata("s2color")+
+  xlab("Mean reaction time per participant")+
+  ylab("Mean accuracy per participant")
+
+acc_RT
+
+
+HBC <- ggplot(data= HRD_data, aes(x= Threshold, y = HBC, color = Modality)) +
+  geom_point()+
+  geom_smooth(method = lm)+
+  theme_stata(scheme = "s1color")+
+  scale_colour_stata("s2color")
+
+HBC
+
+# Checking for celing effects in accuracy 
+hist_acc_Ex <- ggplot(data = extero_df, aes (Ex_Accuracy))+
+  geom_histogram()
+
+hist_acc_Ex
+
+hist_acc_In <- ggplot(data = intero_df, aes (In_Accuracy))+
+  geom_histogram()
+
+hist_acc_In
+
+# The histograms revaled no celling effect 
+
+hist_slope_In <- ggplot(data = intero_df, aes (In_Slope))+
+  geom_histogram(color = "darkred", fill = "darkred")+
+  theme_stata(scheme = "s1color")+
+  xlab("Slope for interoception")
+
+hist_slope_In
+
+# SLOPE AND CONFIDENCE ARE CORRELATED
+#bias in extero conditon dos not predict bias in intero condition. 
+# In extero you don't have an overall bias to think your heart is slower. This is a very nice finding, shows that it is better than other tasks. 
+
+
+hist_slope_Ex <- ggplot(data = extero_df, aes (Ex_Slope))+
+  geom_histogram()
+
+hist_slope_Ex
+
+
+hist_thres_Ex <- ggplot(data = extero_df, aes (Ex_threshold))+
+  geom_histogram()
+
+hist_thres_Ex
+
+
+hist_thres_In <- ggplot(data = intero_df, aes (In_threshold))+
+  geom_histogram()
+
+hist_thres_In
+
+# The histograms revaled no celling effect 
+
+
+
+
+
+### EXTRA PLOTS ###
+
+Con <- ggplot(data= HRD_data, aes(x= Modality, y= Confidence, color = Modality, fill = Modality)) +
+  geom_bar(stat="identity")+
+  geom_errorbar(stat="summary", fun.data=mean_se)
+
+Con
+# People are more confident for the extero condition compared to the intero condition
+
+
+# Plot of accuracy 
+accu <- ggplot(data= HRD_data, aes(x= Modality, y= Accuracy, fill = Modality)) +
+  geom_bar(stat="summary", fun.y = mean)+
+  geom_errorbar(stat="summary", fun.data = mean_se, color = "black", width = 0.7)+
+  scale_fill_hue(l=40, c=90)+   # L = luminance, C = contrast 
+  theme_stata(scheme = "s1color")
+
+accu
+
+# Plot of dPrime 
+d_pri <- ggplot(data= HRD_data, aes(x= Modality, y= dPrime, color = Modality)) +
+  geom_bar(stat="summary", fun.y = mean)+
+  geom_errorbar(stat="summary", fun.data=mean_se)
+
+d_pri
+
+# Low dprime = difficulty making decisions 
+
+
+# Plots of confidence and modality 
+
+
+# Plots of confidenceRT and modality
+Con_RT <- ggplot(data= HRD_data, aes(x= Modality, y= ConfidenceRT, color = Modality, fill = Modality)) +
+  geom_bar(stat="identity")+
+  geom_errorbar(stat="summary", fun.data=mean_se)
+
+Con_RT
+# people are fasterat rating their confidence for the exterior condition than for the interior condition. Suggesting that people find the exterior condition easier. 
+
+
+
+
+
+## T-TEST TO SANITY CHECK HRD TASK DATA ##
+
+slope_test <- t.test(Slope ~ Modality, data = HRD_data, paired = TRUE) # Beware for two time 176
+slope_test
+
+thres_test <- t.test(Threshold ~ Modality, data = HRD_data, paired = TRUE) 
+thres_test
+
+Accuracy_test<- t.test(Accuracy ~ Modality, data = HRD_data, paired = TRUE) 
+Accuracy_test
+
+RT_test<- t.test(EstimationRT ~ Modality, data = HRD_data, paired = TRUE) 
+RT_test
+
+
+# Eyeballing for normal distribution
+hist(HRD_data$Slope)
+hist(HRD_data$Threshold)
+hist(HRD_data$Accuracy)
+
+# Slope, Threshold and Accuracy is not normally distribution 
+```
+
+
+
+
+Correlation plot
+```{r}
+
+## CORRELATION PLOT FOR INTERO AND EXTERO ##
+
+# Selecting only the column that as In or EX in the name
+combined_shortened <- select(combined_ex_in_df, matches("In_|Ex_"))
+
+# Preparing for correlation plot 
+pairs(combined_shortened, pch = 19)
+cormat_simple <- round(cor(combined_shortened),2)
+head(cormat_simple)
+melted_cormat_simple <- melt(cormat_simple)
+  head(melted_cormat_simple)
+
+# Correlation plot for only the interoceptive and exteroceptive conditions 
+  plot_out_simple <- ggplot(data = melted_cormat_simple, aes(x=Var1, y=Var2, fill=value)) + 
+    geom_tile()+
+    ylab("Variables")+ 
+    xlab("Variables")+
+    scale_fill_gradient2(low = "red", high = "blue", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+    name="Pearson\nCorrelation")+
+    labs(fill= "Pearson correlation coefficient")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+plot_out_simple
+
+#Circle correlation plot
+corrplot(cormat_simple, method = "circle")
+
+
+
+# FOR SCORES AND INTERO ##
+
+# merging scores and itnero variables 
+HRD_intero_scores <- merge(intero_df, scores, by = "record_id")
+
+head(HRD_intero_scores)
+
+# Selecting only interesting items and variables 
+HRD_intero_scores_no_ID <- select(HRD_intero_scores, c(gender, age, In_Accuracy, Confidence, In_Slope, In_threshold, DQ5, PCL, stai, mdi, PHQ9))
+
+# making sure the entire dataframe is as.numeric 
+HRD_intero_scores_no_ID = as.data.frame(sapply(HRD_intero_scores_no_ID, as.numeric))
+
+# making reading for correlation plot 
+cormat_scores <- round(cor(HRD_intero_scores_no_ID, use = "complete.obs"),2)
+head(cormat_scores)
+
+# making the correlation plot. Un-corrected 
+corrplot(cormat_scores, method = "circle",tl.col = "black", tl.srt = 90, type = "upper", tl.cex = 0.7, mar=c(0,0,1,0))
+
+# Correlation significance test with a 95% confidence interval 
+res1 <- cor.mtest(HRD_intero_scores_no_ID, conf.level = .95)
+
+# Corrected correlation plot with 0.05%
+corrplot(cormat_scores, method = "circle",tl.col = "black", tl.srt = 90, type = "upper", tl.cex = 0.7, mar=c(0,0,1,0), p.mat = res1$p, sig.level = .05)
+
+
+## OTHER WAY OF MAKING THE CORRELATION PLOT 
+
+melted_cormat_scores <- melt(cormat_scores)
+  head(melted_cormat_scores)
+  
+  plot_out_scores <- ggplot(data = melted_cormat_scores, aes(x=Var1, y=Var2, fill=value)) + 
+    geom_tile()+
+    ggtitle("Correlation matrix for interoception variables and psychometric scores")+
+    labs(fill= "Pearson correlation coefficient")+ 
+    scale_fill_gradient2(low = "red", high = "blue", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+    name="Pearson\nCorrelation")+ 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+plot_out_scores
+
+
+```
+
+
+
+## Psychometric items 
+
+```{r}
+
+HRD_intero_scores_ID <- select(HRD_intero_scores, c(record_id, gender, age, In_Accuracy, Confidence, In_Slope, In_threshold, DQ5, PCL, PSS, stai, mdi, PHQ9))
+
+# Plotting the data with the scrores data to see how the distribution is. How many are healthy and how manye are subclinical? 
+PCL <- ggplot(data= HRD_intero_scores, aes(x= DQ5, y= PCL)) +
+  geom_point()+
+  geom_smooth(method = lm)+
+  theme_stata(scheme = "s1color")+
+  scale_colour_stata("s2color")
+
+
+PCL
+
+HRD_Scores<- HRD_Scores %>% 
+    mutate(Age_factor = case_when(
+      age < 20 ~ 'Late Teens', 
+      between(age, 20, 22) ~ 'Early Twenties',
+      between(age, 23, 26) ~ 'Mid Twenties', 
+      between(age, 27, 29) ~ 'Late Twenties',
+      age > 29 ~ 'Thirty +'))
+
+
+plot <- ggplot(data = scores)+
+  geom_smooth(method = 'lm', aes(DQ5, PCL), color = 'black') +
+  geom_point(aes(DQ5, PCL, color = Age_factor, pch = gender)) +
+  geom_vline(xintercept = 11, color = "gray") + #DQ5 threshold    
+  geom_hline(yintercept = 40, color = "gray") + #PCL threshold
+  theme_minimal() +
+  scale_colour_viridis_d() +
+  labs(color = "Age")
+
+HRD_Scores$Age_factor <-as.factor(HRD_Scores$Age_factor)
+HRD_Scores$gender <-as.factor(HRD_Scores$gender)
+
+
+# Greating datafram for boxplot 
+plotting_data <- select(scores, record_id, DQ5, PCL, mdi, PHQ9, PSS, stai)
+library(reshape2)
+melted <- melt(plotting_data, value.name = "Score", id.vars = "record_id", variable.name = "Questionaire")
+
+
+Age_gender <- select(scores, record_id, gender, age) #1 = Woman = 121
+Age_gender$gender <- ifelse(Age_gender$gender == 1, "Female", "Male")
+melted <- merge(melted, Age_gender, by.y = "record_id")
+# Creating dataframe that consists of only interesting items and variables 
+
+box_plot <- ggplot(melted, aes(x= Questionaire, y= Score)) + 
+  geom_boxplot()
+
+box_plot
+
+# ########
+
+pl <- ggplot(scores, aes(record_id, DQ5, color = gender))+
+  geom_point()+
+   geom_hline(yintercept = 11, color = "black")
+
+pl
+
+
+
+
+# Plot for DQ5
+DQ_5 <- ggplot(data = HRD_Scores)+
+  geom_point(aes(record_id, DQ5, color = Age_factor))+
+   geom_hline(yintercept = 11, color = "black")+
+   theme_stata(scheme = "s1color")+
+  scale_colour_stata("s2color")+
+   labs(color = "Age")+
+  xlab("Participants")+
+  ylab("DQ-5 Score")
+
+DQ_5
+
+# Plot for PCL 
+PCL_C <- ggplot(data = HRD_Scores)+
+  geom_point(aes(record_id, PCL, color = Age_factor))+
+   geom_hline(yintercept = 44, color = "black")+
+   theme_stata(scheme = "s1color")+
+  scale_colour_stata("s2color")+
+   labs(color = "Age")+ 
+  xlab("Participants")+
+   ylab("PCL-C Score")
+
+
+PCL_C
+
+# Plot for MDI
+
+MDI <- ggplot(data = HRD_Scores)+
+  geom_point(aes(record_id, mdi, color = Age_factor))+
+   geom_hline(yintercept = 21, color = "black")+   # Cutoff set at mild depression
+   theme_stata(scheme = "s1color")+
+  scale_colour_stata("s2color")+
+   labs(color = "Age")+
+  xlab("Participants")+
+   ylab("MDI Score")
+
+
+MDI
+
+PHQ_9 <- ggplot(data = HRD_Scores)+
+  geom_point(aes(record_id, PHQ9, color = Age_factor))+
+   geom_hline(yintercept = 10, color = "black")+   # Cutoff set at mild depression
+   theme_stata(scheme = "s1color")+
+  scale_colour_stata("s2color")+
+   labs(color = "Age")+
+   ylab("PHQ9 Score")+
+  xlab("Participants")
+
+
+PHQ_9
+
+
+STAI <- ggplot(data = HRD_Scores)+
+  geom_point(aes(record_id, stai, color = Age_factor))+
+   geom_hline(yintercept = 80, color = "black")+  
+   theme_stata(scheme = "s1color")+
+  scale_colour_stata("s2color")+
+   labs(color = "Age")+
+   ylab("STAI Score")+
+  xlab("Participants")
+
+
+STAI
+
+
+PSS <- ggplot(data = scores)+
+  geom_point(aes(record_id, PSS, color = Age_factor, pch = gender))+
+   geom_hline(yintercept = 14, color = "black")+   # Cutoff set at low stress
+   theme_stata(scheme = "s1color")+
+  scale_colour_stata("s2color")+
+   labs(color = "Age", pch = "Gender")
+
+PSS
+
+library(patchwork)
+
+DQ_5 + PCL_C + PHQ_9 + STAI + MDI
+
+```
+
+
+
+
+NETWORK ANALYSIS 
+```{r}
+# Removing NA
+HRD_questionaire_merge <- filter(HRD_questionaire_merge, record_id != 25 & record_id != 31 & record_id != 160 & record_id != 177 & record_id != 187 & record_id != 202)
+
+## 193 is included in the analysis 
+
+demo <- select(HRD_questionaire_merge, c(In_Slope, In_threshold, DecisionRT.y, HBC.y, record_id, age, gender, phq_9_1, phq_9_2, phq_9_3, phq_9_4, phq_9_5,phq_9_7, phq_9_8, phq_9_9, mdi_4, mdi_5, pcl_1, pcl_2, pcl_3, pcl_4, pcl_5, pcl_7, pcl_14, pcl_16, pcl_17, stai_6, stai_7, stai_9, stai_37, stai_38, dq_1))
+
+
+
+# Create dataset that will be used
+NW_data <- select(HRD_questionaire_merge, c(In_Slope, In_threshold, DecisionRT.y, HBC.y, phq_9_1, phq_9_2, phq_9_3, phq_9_4, phq_9_5,phq_9_7, phq_9_8, phq_9_9, mdi_4, mdi_5, pcl_1, pcl_2, pcl_3, pcl_4, pcl_5, pcl_7, pcl_14, pcl_16, pcl_17, stai_6, stai_7, stai_9, stai_37, stai_38, dq_1))
+
+
+
+# Check this data for normality 
+hist(NW_data$In_Slope) # ikke normalt fordelt 
+hist(NW_data$In_threshold) # næsten normal fordelt 
+hist(NW_data$DecisionRT.y)
+hist(NW_data$phq_9_1) # ikke normalt fordelt 
+hist(NW_data$phq_9_2) # ikke normalt fordelt 
+hist(NW_data$phq_9_3) # ikke normalt fordelt 
+hist(NW_data$phq_9_4) # ikke normalt fordelt 
+hist(NW_data$phq_9_5) # ikke normalt fordelt 
+hist(NW_data$phq_9_7) # ikke normalt fordelt 
+hist(NW_data$phq_9_8) # ikke normalt fordelt 
+hist(NW_data$phq_9_9) # ikke normalt fordelt 
+hist(NW_data$mdi_4) # ikke normalt fordelt 
+hist(NW_data$mdi_5) # ikke normalt fordelt 
+hist(NW_data$pcl_1) # ikke normalt fordelt 
+hist(NW_data$pcl_2) # ikke normalt fordelt 
+hist(NW_data$pcl_3) # ikke normalt fordelt 
+hist(NW_data$pcl_4) # ikke normalt fordelt 
+hist(NW_data$pcl_5) # ikke normalt fordelt 
+hist(NW_data$pcl_7) # ikke normalt fordelt 
+hist(NW_data$pcl_14) # ikke normalt fordelt 
+hist(NW_data$pcl_16) # ikke normalt fordelt 
+hist(NW_data$pcl_17) # ikke normalt fordelt 
+hist(NW_data$stai_6) # ikke normalt fordelt 
+hist(NW_data$stai_7) # ikke normalt fordelt 
+hist(NW_data$stai_9) # ikke normalt fordelt 
+hist(NW_data$stai_37) # ikke normalt fordelt 
+hist(NW_data$stai_38) # ikke normalt fordelt 
+hist(NW_data$dq_1) # ikke normalt fordelt 
+
+#Renaming variables 
+NW_data <- plyr::rename(NW_data, c("phq_9_1" = "phq9_1"))
+NW_data <- plyr::rename(NW_data, c("phq_9_2" = "phq9_2"))
+NW_data <- plyr::rename(NW_data, c("phq_9_3" = "phq9_3"))
+NW_data <- plyr::rename(NW_data, c("phq_9_4" = "phq9_4"))
+NW_data <- plyr::rename(NW_data, c("phq_9_5" = "phq9_5"))
+NW_data <- plyr::rename(NW_data, c("phq_9_7" = "phq9_7"))
+NW_data <- plyr::rename(NW_data, c("phq_9_8" = "phq9_8"))
+NW_data <- plyr::rename(NW_data, c("phq_9_9" = "phq9_9"))
+NW_data <- plyr::rename(NW_data, c("In_Slope" = "Slope"))
+NW_data <- plyr::rename(NW_data, c("In_threshold" = "Threshold"))
+NW_data <- plyr::rename(NW_data, c("DecisionRT.y" = "RT"))
+NW_data <- plyr::rename(NW_data, c("HBC.y" = "HBC"))
+
+
+# Transform to normal distribution
+NW_data_n <- huge.npn(NW_data)
+
+# This data will be treated as contionus, since as questioanires are on a 4, 5 or 6 point likert scale, since this belong to a interval scale category 
+
+
+# Estimate the network using bootnet EBICglasso (Extended Baysian Information Criterion) (graphical lasso)
+# Use lasso regularization to estimate the model - good because of sample size 
+# Gaussian Markov random field estimation using graphical LASSO and extended Bayesian information criterion to select optimal regulariza-tion parameter. Using EBICglasso from the qgraph package.
+network_025 <- estimateNetwork(NW_data_n, default = "EBICglasso", corMethod = "cor", tuning = 0.25)
+
+# Plot showing the different centrality measures for the network
+centralityPlot(network_025, include = c("Strength", "Betweenness", "Closeness", "ExpectedInfluence"))
+clusteringPlot(network_025)
+
+# obtain weights matrix 
+network_025$graph
+centralityTable(network_025)
+plot(network_025, plot = "difference", onlyNonZero = TRUE, order = "sample")
+
+# plot the network
+Names <- scan("Data/names .txt", what = "character", sep = "\n")
+
+Traits <- rep(c("Interoception",
+                "PHQ9",
+                "MDI",
+                "PCL",
+                "STAI",
+                "DQ5"), c(4, 8, 2, 9, 5, 1))
+
+
+
+plot <- plot(network_025, layout = "spring",
+     theme = "colorblind",
+     groups = Traits,
+     nodeNames = Names, 
+     legend.cex = 0.35,
+     maximum = 0.5,
+     filetype = "pdf", filename = "network_no_bootstrap_0.25_tuning")
+
+## Clustering
+
+
+## Bridge symptoms 
+
+b <- bridge(network = plot, communities = list("Interoception" = c(1:4), "PHQ9" = c(5:12), "MDI" = c(13:14), "PCL" = c(15:24), "STAI" = c(25:31), "DQ5" = c(32)), directed = FALSE)
+
+plot(b)
+# https://www.youtube.com/watch?v=llM3vZiGeJY
+
+# Bootstrap to test for stability of overall network - nonparametric bootstrap (observations in the data are resampled with replacement to create new plausible datasets) - 3000
+
+boot_nonparametric_network_025 <- bootnet(network_025, 
+                                      nBoots = 3000, 
+                                      nCores = 1)
+
+plot(boot_nonparametric_network_025, order = "sample", labels = FALSE)
+# Sample mean and bootstrap mean are somewhat simair, which is good. Speaks to stability of the network, however the confidence interval of the bootstrap is somewhat wide, which speaks to in-stability in the network. The network structure could change with a bigger sample size. The large CI's indicate that interpretation of the order of most edges, should be done with care. 
+
+# plotting edge differences 
+plot(boot_nonparametric_network_025, plot = "difference", onlyNonZero = TRUE, order = "sample")
+# Expected significance level given number of bootstrap samples is approximately: 0.05
+#Gthe onlyNonZero argument sets so that only edges are shown that are nonzero in the estimated network, and order = "sample" orders the edge-weights from the most positive to the most negative edge-weight in the sample network
+# Back square means there is a significant different between to edges. This plot shows that there is not many significant differences. The more back squares the more stable the network probably is. 
+# No correction for multiple comparisions, since this would likely not leave any significant edges. Some black boxes may be false posiives, but this is most likely to happen around the edges. 
+
+
+# Bootstrap to test for stability of centrality - case dropping bootstrap - 1000
+
+boot_case_network_025 <- bootnet(network_025, 
+                             nBoots = 3000, 
+                             nCores = 1, 
+                             type = "case", 
+                             statistics = c("Strength", "Betweenness", "Closeness","ExpectedInfluence"))
+
+
+# Plotting the case bootstrapping 
+plot(boot_case_network_025, statistics = c("Strength", "Betweenness", "Closeness", "ExpectedInfluence"))
+corStability(boot_case_network_025)
+
+
+# Estimating network after bootstrapping 
+network_threshold_025 <- bootThreshold(boot_nonparametric_network_025, alpha = 0.05, verbose = TRUE, thresholdIntercepts = FALSE)
+
+plot(network_threshold_025, 
+     layout = "spring", 
+     theme = "colorblind", 
+     groups = Traits,
+     nodeNames = Names, 
+     legend.cex = 0.35,
+     maximum = 0.5,
+     filetype = "pdf", filename = "bootstrapped_network_0.25_tuning")
+
+
+network_threshold_025$graph
+```
+
+Exploratory analysis with MAIA
+```{r}
+Ex <- select(HRD_questionaire_merge, c(record_id, phq_9_1, phq_9_2, phq_9_3, phq_9_4, phq_9_5,phq_9_7, phq_9_8, phq_9_9, mdi_4, mdi_5, pcl_1, pcl_2, pcl_3, pcl_4, pcl_5, pcl_7, pcl_14, pcl_16, pcl_17, stai_6, stai_7, stai_9, stai_37, stai_38, dq_1))
+
+maia <- select(scores, c(record_id, maia_notice, maia_ndistract, maia_nworry, maia_attnReg, maia_EmoAware, maia_SelfRef, maia_listen, maia_trust))
+
+
+maia_NW <- merge(Ex, maia, by = "record_id")
+maia_NW <- select(maia_NW, -c(record_id))
+
+maia_NW <- huge.npn(maia_NW)
+
+maia_Network <- estimateNetwork(maia_NW, default = "EBICglasso", corMethod = "cor", tuning = 0.25)
+
+# Plot showing the different centrality measures for the network
+centralityPlot(maia_Network, include = c("Strength", "Betweenness", "Closeness", "ExpectedInfluence"))
+
+# obtain weights matrix 
+maia_Network$graph
+centralityTable(maia_Network)
+
+# plot the network
+Names_maia <- scan("Data/names_test.txt", what = "character", sep = "\n")
+
+Traits_maia <- rep(c("PHQ9",
+                "MDI",
+                "PCL",
+                "STAI",
+                "DQ5",
+                "MAIA - Subjective measure of interoception"), c(8, 2, 9, 5, 1, 8))
+
+
+
+maia_plot <- plot(maia_Network, layout = "spring",
+     theme = "colorblind",
+     legend.cex = 0.35,
+     groups = Traits_maia,
+     nodeNames = Names_maia,
+     maximum = 0.5,
+     filetype = "pdf", filename = "MAIA_network_no_bootstrap")
+
+
+boot_nonparametric_network_maia <- bootnet(maia_Network, 
+                                      nBoots = 3000, 
+                                      nCores = 1)
+
+plot(boot_nonparametric_network_maia, order = "sample", labels = FALSE)
+
+# plotting edge differences 
+plot(boot_nonparametric_network_maia, plot = "difference", onlyNonZero = TRUE, order = "sample")
+
+
+# Bootstrap to test for stability of centrality - case dropping bootstrap
+boot_case_maia <- bootnet(maia_Network, 
+                             nBoots = 3000, 
+                             nCores = 1, 
+                             type = "case", 
+                             statistics = c("Strength", "Betweenness", "Closeness","ExpectedInfluence"))
+
+
+# Plotting the case bootstrapping 
+plot(boot_case_maia, statistics = c("Strength", "Betweenness", "Closeness", "ExpectedInfluence"))
+corStability(boot_case_maia)
+
+
+# Estimating network after bootstrapping 
+network_threshold_maia <- bootThreshold(boot_nonparametric_network_maia, alpha = 0.05, verbose = TRUE, thresholdIntercepts = FALSE)
+
+plot(network_threshold_maia, 
+     layout = "spring", 
+     theme = "colorblind", 
+     groups = Traits,
+     nodeNames = Names, 
+     legend.cex = 0.35,
+     maximum = 0.5,
+     filetype = "pdf", filename = "bootstrapped_maia")
+
+
+network_threshold_maia$graph
+
+```
+
+Exploratory analysis with the difference between intero and extero
+```{r}
+# Calculating the difference between threshold in intero and extero conditions 
+combined_ex_in_df$diff <- combined_ex_in_df$In_threshold - combined_ex_in_df$Ex_threshold
+
+# Calculating the difference between slope in intero and extero conditions 
+combined_ex_in_df$diff_slope <- combined_ex_in_df$In_Slope - combined_ex_in_df$Ex_Slope
+
+HRD_questionaire_diff <- merge(combined_ex_in_df, clean_data_set, by = "record_id")
+
+diff <- select(HRD_questionaire_diff, c(diff, diff_slope, phq_9_1, phq_9_2, phq_9_3, phq_9_4, phq_9_5,phq_9_7, phq_9_8, phq_9_9, mdi_4, mdi_5, pcl_1, pcl_2, pcl_3, pcl_4, pcl_5, pcl_7, pcl_14, pcl_16, pcl_17, stai_6, stai_7, stai_9, stai_37, stai_38, dq_1))
+
+
+diff <- huge.npn(diff)
+
+diff_Network <- estimateNetwork(diff, default = "EBICglasso", corMethod = "cor", tuning = 0.25)
+
+# Plot showing the different centrality measures for the network
+centralityPlot(diff_Network, include = c("Strength", "Betweenness", "Closeness", "ExpectedInfluence"))
+
+Names_diff <- scan("Data/names_diff.txt", what = "character", sep = "\n")
+
+Traits_diff <- rep(c("Interoception",
+                "PHQ9",
+                "MDI",
+                "PCL",
+                "STAI",
+                "DQ5"), c(2, 8, 2, 9, 5, 1))
+
+
+
+diff_plot <- plot(diff_Network, layout = "spring",
+     theme = "colorblind",
+     legend.cex = 0.35,
+     groups = Traits_diff,
+     nodeNames = Names_diff,
+     maximum = 0.5,
+     filetype = "pdf", filename = "Diff_network")
+
+
+boot_nonparametric_ndiff <- bootnet(diff_Network, 
+                                      nBoots = 3000, 
+                                      nCores = 1)
+
+plot(boot_nonparametric_ndiff, order = "sample", labels = FALSE)
+
+# plotting edge differences 
+plot(boot_nonparametric_ndiff, plot = "difference", onlyNonZero = TRUE, order = "sample")
+
+
+# Bootstrap to test for stability of centrality - case dropping bootstrap
+boot_case_diff <- bootnet(diff_Network, 
+                             nBoots = 3000, 
+                             nCores = 1, 
+                             type = "case", 
+                             statistics = c("Strength", "Betweenness", "Closeness","ExpectedInfluence"))
+
+
+# Plotting the case bootstrapping 
+plot(boot_case_diff , statistics = c("Strength", "Betweenness", "Closeness", "ExpectedInfluence"))
+corStability(boot_case_diff)
+
+
+# Estimating network after bootstrapping 
+network_threshold_diff <- bootThreshold(boot_nonparametric_ndiff , alpha = 0.05, verbose = TRUE, thresholdIntercepts = FALSE)
+
+plot(network_threshold_diff, 
+     layout = "spring", 
+     theme = "colorblind", 
+     groups = Traits,
+     nodeNames = Names, 
+     legend.cex = 0.35,
+     maximum = 0.5,
+     filetype = "pdf", filename = "bootstrapped_diff")
+
+
+network_threshold_diff$graph
+```
+
